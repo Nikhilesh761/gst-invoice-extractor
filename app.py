@@ -29,7 +29,7 @@ if not API_KEY:
     st.stop()
 
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
+model = genai.GenerativeModel("gemini-3.6-flash")
 
 EXTRACTION_PROMPT = """You are reading a handwritten or printed Indian GST tax invoice photo.
 Extract every field you can see into STRICT JSON only, no markdown fences, no commentary.
