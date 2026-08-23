@@ -204,40 +204,160 @@ st.sidebar.title("🧾 GST Extractor")
 st.sidebar.markdown("Upload invoice photos → get structured GST data + analytics, automatically.")
 customer_name_input = st.sidebar.text_input("Customer / business name (optional tag)", "")
 
-# ---------- MAIN: UPLOAD ----------
+# ---------- MAIN: ADD INVOICES (upload photo OR type manually) ----------
 st.title("GST Invoice Extractor & Analytics")
-st.caption("Upload one or more invoice photos below. Each is read, validated, and added to your running report.")
+st.caption("Add invoices by photo or by typing them in — both feed the same validated report below.")
 
-uploaded_files = st.file_uploader(
-    "Upload invoice photo(s)", type=["jpg", "jpeg", "png"], accept_multiple_files=True
-)
+tab_upload, tab_manual = st.tabs(["📷 Upload Photo(s)", "⌨️ Enter Manually"])
 
-if uploaded_files and st.button("Extract data from uploaded photos", type="primary"):
-    progress = st.progress(0, text="Starting extraction...")
-    total = len(uploaded_files)
-    done = 0
+with tab_upload:
+    uploaded_files = st.file_uploader(
+        "Upload invoice photo(s)", type=["jpg", "jpeg", "png"], accept_multiple_files=True,
+        key="photo_uploader"
+    )
 
-    # Free-tier Gemini allows ~15-30 requests/min — 4 concurrent workers is a safe
-    # speed-up without tripping rate limits. Raise this only if you're on a paid tier.
-    MAX_WORKERS = min(4, total)
+    if uploaded_files and st.button("Extract data from uploaded photos", type="primary"):
+        progress = st.progress(0, text="Starting extraction...")
+        total = len(uploaded_files)
+        done = 0
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {
-            executor.submit(extract_one, uf.name, Image.open(uf), customer_name_input or "unspecified"): uf.name
-            for uf in uploaded_files
-        }
-        for future in as_completed(futures):
-            fname = futures[future]
-            try:
-                data = future.result()
+        # Free-tier Gemini allows ~15-30 requests/min — 4 concurrent workers is a safe
+        # speed-up without tripping rate limits. Raise this only if you're on a paid tier.
+        MAX_WORKERS = min(4, total)
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {
+                executor.submit(extract_one, uf.name, Image.open(uf), customer_name_input or "unspecified"): uf.name
+                for uf in uploaded_files
+            }
+            for future in as_completed(futures):
+                fname = futures[future]
+                try:
+                    data = future.result()
+                    st.session_state.invoices.append(data)
+                except Exception as e:
+                    st.warning(f"Could not parse {fname}: {e}")
+                done += 1
+                progress.progress(done / total, text=f"Processed {done}/{total}...")
+
+        progress.progress(1.0, text="Done.")
+        st.success(f"Processed {total} invoice(s).")
+
+with tab_manual:
+    st.caption("For invoices you'd rather type in directly — no photo needed, no extraction uncertainty at all "
+               "since you're entering the exact figures yourself.")
+
+    if "manual_line_items" not in st.session_state:
+        st.session_state.manual_line_items = pd.DataFrame(
+            [{"particulars": "", "hsn_code": "", "qty": "", "rate": "", "amount": ""}]
+        )
+
+    with st.form("manual_entry_form", clear_on_submit=False):
+        c1, c2, c3 = st.columns(3)
+        m_vendor = c1.text_input("Vendor name")
+        m_vendor_gstin = c2.text_input("Vendor GSTIN (optional)")
+        m_bill_no = c3.text_input("Bill No.")
+        c4, c5, c6 = st.columns(3)
+        m_date = c4.text_input("Date (as written, e.g. 6/4/26)")
+        m_customer = c5.text_input("Customer name (optional)")
+        m_customer_gstin = c6.text_input("Customer GSTIN (optional)")
+
+        st.markdown("**Line items** — add a row per product/service. Amount auto-fills as qty × rate but you can override it.")
+        edited_items = st.data_editor(
+            st.session_state.manual_line_items,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "particulars": st.column_config.TextColumn("Particulars"),
+                "hsn_code": st.column_config.TextColumn("HSN Code"),
+                "qty": st.column_config.TextColumn("Qty"),
+                "rate": st.column_config.TextColumn("Rate (₹)"),
+                "amount": st.column_config.TextColumn("Amount (₹) — leave blank to auto-calc"),
+            },
+            key="manual_items_editor",
+        )
+
+        st.markdown("**Tax**")
+        t1, t2, t3, t4, t5 = st.columns(5)
+        m_subtotal = t1.text_input("Subtotal (₹)", "")
+        m_cgst_pct = t2.text_input("CGST %", "")
+        m_sgst_pct = t3.text_input("SGST %", "")
+        m_igst_pct = t4.text_input("IGST %", "")
+        m_grand_total = t5.text_input("Grand Total (₹)")
+
+        submitted = st.form_submit_button("Add this invoice", type="primary")
+
+        if submitted:
+            if not m_vendor or not m_grand_total:
+                st.error("Vendor name and Grand Total are required at minimum.")
+            else:
+                line_items = []
+                for _, row in edited_items.iterrows():
+                    if not str(row.get("particulars", "")).strip():
+                        continue
+                    qty, _ = extract_leading_number(row.get("qty"))
+                    rate, _ = to_decimal(row.get("rate"))
+                    amt_raw = str(row.get("amount", "")).strip()
+                    if amt_raw:
+                        amount_str = amt_raw
+                    elif qty is not None and rate is not None:
+                        amount_str = str((qty * rate).quantize(Decimal("0.01")))
+                    else:
+                        amount_str = ""
+                    line_items.append({
+                        "particulars": row.get("particulars", ""),
+                        "hsn_code": row.get("hsn_code", ""),
+                        "qty": str(row.get("qty", "")),
+                        "rate": str(row.get("rate", "")),
+                        "amount": amount_str,
+                    })
+
+                subtotal_val = m_subtotal.strip()
+                if not subtotal_val and line_items:
+                    auto_sub = sum((d(li["amount"]) for li in line_items), Decimal("0"))
+                    subtotal_val = str(auto_sub)
+
+                cgst_amt, sgst_amt, igst_amt = "", "", ""
+                sub_dec, sub_ok = to_decimal(subtotal_val)
+                if sub_ok and sub_dec is not None:
+                    if m_cgst_pct.strip():
+                        p, ok = to_decimal(m_cgst_pct)
+                        if ok and p is not None:
+                            cgst_amt = str((sub_dec * p / 100).quantize(Decimal("0.01")))
+                    if m_sgst_pct.strip():
+                        p, ok = to_decimal(m_sgst_pct)
+                        if ok and p is not None:
+                            sgst_amt = str((sub_dec * p / 100).quantize(Decimal("0.01")))
+                    if m_igst_pct.strip():
+                        p, ok = to_decimal(m_igst_pct)
+                        if ok and p is not None:
+                            igst_amt = str((sub_dec * p / 100).quantize(Decimal("0.01")))
+
+                data = {
+                    "vendor_name": m_vendor,
+                    "vendor_gstin": m_vendor_gstin,
+                    "bill_no": m_bill_no,
+                    "date": m_date,
+                    "customer_name": m_customer,
+                    "customer_gstin": m_customer_gstin,
+                    "line_items": line_items,
+                    "subtotal": subtotal_val,
+                    "cgst_pct": m_cgst_pct, "cgst_amt": cgst_amt,
+                    "sgst_pct": m_sgst_pct, "sgst_amt": sgst_amt,
+                    "igst_pct": m_igst_pct, "igst_amt": igst_amt,
+                    "grand_total": m_grand_total,
+                    "uncertain_money_fields": [],  # you typed it yourself — nothing to flag as uncertain
+                    "extraction_confidence": "high",
+                    "_source_file": f"Manual entry — {m_bill_no or 'no bill no.'}",
+                    "_uploaded_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "_customer_tag": customer_name_input or "unspecified",
+                }
+                data["_math_issues"] = verify_invoice_math(data)  # still cross-checked, in case of a typo
                 st.session_state.invoices.append(data)
-            except Exception as e:
-                st.warning(f"Could not parse {fname}: {e}")
-            done += 1
-            progress.progress(done / total, text=f"Processed {done}/{total}...")
-
-    progress.progress(1.0, text="Done.")
-    st.success(f"Processed {total} invoice(s).")
+                st.session_state.manual_line_items = pd.DataFrame(
+                    [{"particulars": "", "hsn_code": "", "qty": "", "rate": "", "amount": ""}]
+                )
+                st.success(f"Added invoice from {m_vendor}. Scroll down to see it in the report.")
 
 st.divider()
 
