@@ -48,23 +48,25 @@ Schema:
   "sgst_pct": "", "sgst_amt": "",
   "igst_pct": "", "igst_amt": "",
   "grand_total": "",
-  "uncertain_fields": ["list the exact field names/line-item indices you were not fully sure of"],
-  "extraction_confidence": "high, medium, or low based on handwriting legibility"
+  "uncertain_money_fields": ["ONLY numeric/money fields you weren't sure of, by name/index — e.g. 'line_items[2].amount', 'grand_total'. Do NOT include text fields like customer_name, customer_gstin, vendor_name, date, or particulars here — those don't affect GST accuracy."],
+  "extraction_confidence": "high, medium, or low based on handwriting legibility of the MONEY figures specifically"
 }
 
 HARD RULES — these are non-negotiable:
 1. Copy every number EXACTLY as written, digit for digit, as a string (e.g. "1500.00", not 1500).
    Do not round. Do not convert. Do not "clean up" a number to make totals match.
-2. NEVER guess a digit you cannot clearly see. If a number is illegible or ambiguous, put your
-   best-guess value in the field AND add that field's name to "uncertain_fields" — do not silently
-   invent a plausible-looking number.
-3. Do NOT attempt to fix or reconcile math yourself. If the handwritten total doesn't match what
-   qty*rate would produce, copy the number exactly as written anyway — a separate process will
-   check the math. Your only job is faithful transcription, not correction.
-4. If a field is genuinely not present on the invoice, use "" for text or "" for numbers (not 0 —
-   0 implies you saw a zero, "" means absent).
-5. Preserve leading/trailing characters exactly as written (e.g. if it looks like "1O0" due to
-   handwriting ambiguity between O and 0, note it in uncertain_fields rather than silently choosing).
+2. NEVER guess a digit you cannot clearly see in a MONEY field (qty, rate, amount, subtotal, tax
+   amounts, grand total). If a money digit is illegible or ambiguous, put your best-guess value in
+   the field AND add that field to "uncertain_money_fields".
+3. Text fields (customer name, customer GSTIN, vendor name, date, particulars/product names) are
+   often genuinely blank or messy on real invoices — that is normal and not something to flag.
+   If blank, use "". If legible even loosely, just transcribe it — do not add these to
+   uncertain_money_fields under any circumstances, since they don't affect GST calculation accuracy.
+4. Do NOT attempt to fix or reconcile math yourself. Copy numbers exactly as written even if they
+   don't seem to add up — a separate process checks the math. Your only job is faithful
+   transcription of what's on the page, not correction.
+5. If a numeric field is genuinely not present on the invoice (e.g. no IGST line at all), use ""
+   (not 0 — 0 implies you saw a zero, "" means absent).
 """
 
 
@@ -246,7 +248,7 @@ if st.session_state.invoices:
     rows = []
     for inv in st.session_state.invoices:
         issues = inv.get("_math_issues", [])
-        uncertain = inv.get("uncertain_fields", [])
+        uncertain = inv.get("uncertain_money_fields", [])
         rows.append({
             "File": inv.get("_source_file", ""),
             "Customer tag": inv.get("_customer_tag", ""),
@@ -259,21 +261,24 @@ if st.session_state.invoices:
             "IGST": float(d(inv.get("igst_amt"))),
             "Grand Total": float(d(inv.get("grand_total"))),
             "Confidence": inv.get("extraction_confidence", ""),
-            "Math OK?": "⚠️ Check" if issues else "✅ Verified",
-            "Uncertain fields": ", ".join(uncertain) if uncertain else "—",
+            "Numbers OK?": "⚠️ Check" if (issues or uncertain) else "✅ Accurate",
         })
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True)
 
-    # ---------- FLAGGED INVOICES — shown prominently, never silently corrected ----------
+    # ---------- FLAGGED INVOICES — only for genuine money-accuracy problems.
+    # Text fields (customer name/GSTIN, date formatting) never trigger this anymore —
+    # only a real math mismatch or a money digit the model wasn't confident reading. ----------
     any_issues = any(inv.get("_math_issues") for inv in st.session_state.invoices)
-    any_uncertain = any(inv.get("uncertain_fields") for inv in st.session_state.invoices)
+    any_uncertain = any(inv.get("uncertain_money_fields") for inv in st.session_state.invoices)
     if any_issues or any_uncertain:
-        st.error("Some invoices need a manual look before you trust the numbers below. "
-                  "Nothing is auto-corrected — the app only flags, it never guesses on your behalf.")
+        n_flagged = sum(1 for inv in st.session_state.invoices
+                         if inv.get("_math_issues") or inv.get("uncertain_money_fields"))
+        st.warning(f"{n_flagged} of {len(st.session_state.invoices)} invoice(s) have a money figure "
+                    "worth double-checking against the photo. Everything else below is accurate as extracted.")
         for inv in st.session_state.invoices:
             issues = inv.get("_math_issues", [])
-            uncertain = inv.get("uncertain_fields", [])
+            uncertain = inv.get("uncertain_money_fields", [])
             if issues or uncertain:
                 with st.expander(f"⚠️ {inv.get('_source_file','')} — {inv.get('vendor_name','')} "
                                   f"(Bill {inv.get('bill_no','')})", expanded=False):
@@ -282,7 +287,7 @@ if st.session_state.invoices:
                         for iss in issues:
                             st.markdown(f"- {iss}")
                     if uncertain:
-                        st.markdown("**Fields the model wasn't fully confident reading:**")
+                        st.markdown("**Money figures the model wasn't fully confident reading:**")
                         st.markdown(f"- {', '.join(uncertain)}")
                     st.caption("Open the original photo and correct these manually before relying on this invoice's totals.")
 
@@ -565,8 +570,8 @@ if st.session_state.invoices:
     for inv in st.session_state.invoices:
         for iss in inv.get("_math_issues", []):
             flags_rows.append((inv.get("vendor_name", ""), inv.get("_source_file", ""), "Math", iss))
-        for u in inv.get("uncertain_fields", []):
-            flags_rows.append((inv.get("vendor_name", ""), inv.get("_source_file", ""), "Uncertain field", u))
+        for u in inv.get("uncertain_money_fields", []):
+            flags_rows.append((inv.get("vendor_name", ""), inv.get("_source_file", ""), "Uncertain money field", u))
     if flags_rows:
         fs = wb.create_sheet("Flags - Needs Review")
         fs.append(["Vendor", "File", "Type", "Issue"])
