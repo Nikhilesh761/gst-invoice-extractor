@@ -3,3 +3,4 @@ google-generativeai
 pandas
 Pillow
 openpyxl
+fpdf2

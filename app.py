@@ -19,6 +19,8 @@ from PIL import Image
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from fpdf import FPDF
+import statistics
 import io
 
 st.set_page_config(page_title="Ledger — GST Invoice Intelligence", page_icon="🗒️", layout="wide")
@@ -486,7 +488,183 @@ def extract_one(uf_name, pil_img, customer_tag):
     return data
 
 
-# ---------- SHARED STORAGE (SQLite) ----------
+# ============================================================================
+# ADVANCED FEATURES: GSTIN checksum validation, AI insights, anomaly detection, PDF export
+# ============================================================================
+
+GSTIN_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def validate_gstin(gstin):
+    """Validates an Indian GSTIN using its real check-digit algorithm (mod-36),
+    the same family of checksum as a credit card's Luhn check but base-36.
+    Returns (is_valid: bool, reason: str)."""
+    if not gstin:
+        return None, "Not provided"
+    g = gstin.strip().upper().replace(" ", "")
+    if len(g) != 15:
+        return False, f"GSTIN must be 15 characters (found {len(g)})"
+    if not all(c in GSTIN_ALPHABET for c in g):
+        return False, "Contains invalid characters"
+    try:
+        total = 0
+        for i, ch in enumerate(g[:14]):
+            digit = GSTIN_ALPHABET.index(ch)
+            factor = 2 if i % 2 == 1 else 1
+            prod = digit * factor
+            prod = (prod // 36) + (prod % 36)
+            total += prod
+        check_digit = (36 - (total % 36)) % 36
+        expected = GSTIN_ALPHABET[check_digit]
+        if expected == g[14]:
+            return True, "Valid checksum"
+        return False, f"Checksum mismatch (expected '{expected}', found '{g[14]}')"
+    except Exception:
+        return False, "Could not validate"
+
+
+def detect_anomalies(invoices):
+    """Flags line items priced noticeably above a vendor's own historical average
+    for that exact product — real overcharge detection, not just a display table.
+    Returns a list of anomaly dicts."""
+    # build vendor+item -> list of (rate, source) history
+    history = {}
+    for inv in invoices:
+        vendor = inv.get("vendor_name", "") or "Unknown Vendor"
+        for item in inv.get("line_items", []):
+            particulars = (item.get("particulars", "") or "").strip().lower()
+            if not particulars:
+                continue
+            rate, ok = to_decimal(item.get("rate"))
+            if ok and rate is not None:
+                history.setdefault((vendor, particulars), []).append(
+                    (rate, inv.get("bill_no", ""), inv.get("_source_file", ""))
+                )
+
+    anomalies = []
+    THRESHOLD_PCT = Decimal("20")  # flag if >20% above that item's own historical average
+    for (vendor, particulars), records in history.items():
+        if len(records) < 2:
+            continue  # need at least 2 data points to have a "usual" rate
+        rates = [r[0] for r in records]
+        avg_rate = sum(rates) / len(rates)
+        if avg_rate == 0:
+            continue
+        for rate, bill_no, source_file in records:
+            pct_over = ((rate - avg_rate) / avg_rate) * 100
+            if pct_over > THRESHOLD_PCT:
+                anomalies.append({
+                    "vendor": vendor, "particulars": particulars.title(),
+                    "bill_no": bill_no, "file": source_file,
+                    "rate": float(rate), "avg_rate": float(avg_rate.quantize(Decimal("0.01"))),
+                    "pct_over": float(pct_over.quantize(Decimal("0.1"))),
+                })
+    return sorted(anomalies, key=lambda a: -a["pct_over"])
+
+
+def generate_ai_insights(invoices):
+    """Sends aggregated (non-sensitive, numbers-only) stats to Gemini and asks for a
+    short plain-English summary — the 'this reads like a junior accountant's note'
+    feature. Cheap: one small text call, not a vision call."""
+    if not invoices:
+        return "No invoices yet — add some to generate insights."
+
+    by_vendor = {}
+    for inv in invoices:
+        v = inv.get("vendor_name", "") or "Unknown Vendor"
+        by_vendor.setdefault(v, []).append(inv)
+
+    stats_lines = []
+    total_spend = Decimal("0")
+    total_gst = Decimal("0")
+    for vendor, invs in by_vendor.items():
+        spend = sum((d(i.get("grand_total")) for i in invs), Decimal("0"))
+        gst = sum((d(i.get("cgst_amt")) + d(i.get("sgst_amt")) + d(i.get("igst_amt")) for i in invs), Decimal("0"))
+        total_spend += spend
+        total_gst += gst
+        stats_lines.append(f"- {vendor}: {len(invs)} invoice(s), spend ₹{spend}, GST paid ₹{gst}")
+
+    prompt = f"""You are a sharp junior accountant writing a 3-4 sentence plain-English note for a
+small business owner reviewing their vendor invoices. Be specific and use the real numbers given.
+Mention the largest vendor by spend, the total GST paid, and one observation worth their attention
+(e.g. a vendor with unusually many invoices, or a concentration risk). No markdown, no bullet points,
+just natural prose, like a short email note. Do not invent numbers not given below.
+
+Total spend across all vendors: ₹{total_spend}
+Total GST paid: ₹{total_gst}
+Per-vendor breakdown:
+{chr(10).join(stats_lines)}
+"""
+    resp = model.generate_content(prompt)
+    return resp.text.strip()
+
+
+class VendorStatementPDF(FPDF):
+    def header(self):
+        self.set_font("Helvetica", "B", 16)
+        self.set_text_color(30, 30, 30)
+        self.cell(0, 10, "GST Vendor Statement", ln=True)
+        self.set_draw_color(180, 140, 80)
+        self.set_line_width(0.6)
+        self.line(10, 20, 200, 20)
+        self.ln(6)
+
+
+def generate_vendor_pdf(vendor_name, vendor_gstin, invoices):
+    """One-page professional PDF statement for a single vendor — totals, tax
+    breakdown, and every invoice, letterhead-style."""
+    pdf = VendorStatementPDF(format="A4")
+    pdf.add_page()
+    pdf.set_font("Helvetica", "", 11)
+    pdf.set_text_color(50, 50, 50)
+
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, vendor_name, ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    is_valid, reason = validate_gstin(vendor_gstin)
+    gstin_note = f"GSTIN: {vendor_gstin}" if vendor_gstin else "GSTIN: not on file"
+    if is_valid is False:
+        gstin_note += f"  [WARNING: {reason}]"
+    pdf.cell(0, 6, gstin_note, ln=True)
+    pdf.cell(0, 6, f"Statement generated: {datetime.now().strftime('%d %b %Y')}", ln=True)
+    pdf.ln(4)
+
+    total_spend = sum((d(i.get("grand_total")) for i in invoices), Decimal("0"))
+    total_cgst = sum((d(i.get("cgst_amt")) for i in invoices), Decimal("0"))
+    total_sgst = sum((d(i.get("sgst_amt")) for i in invoices), Decimal("0"))
+    total_igst = sum((d(i.get("igst_amt")) for i in invoices), Decimal("0"))
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, "Summary", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"Invoices: {len(invoices)}     Total spend: Rs. {total_spend:,.2f}", ln=True)
+    pdf.cell(0, 6, f"CGST paid: Rs. {total_cgst:,.2f}   SGST paid: Rs. {total_sgst:,.2f}   IGST paid: Rs. {total_igst:,.2f}", ln=True)
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, "Invoices", ln=True)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(230, 230, 230)
+    col_widths = [30, 30, 40, 45, 45]
+    headers = ["Bill No.", "Date", "Subtotal", "Tax", "Grand Total"]
+    for w, h in zip(col_widths, headers):
+        pdf.cell(w, 7, h, border=1, fill=True)
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 9)
+    for inv in invoices:
+        tax = d(inv.get("cgst_amt")) + d(inv.get("sgst_amt")) + d(inv.get("igst_amt"))
+        row = [
+            str(inv.get("bill_no", ""))[:14],
+            str(inv.get("date", ""))[:14],
+            f"Rs. {float(d(inv.get('subtotal'))):,.2f}",
+            f"Rs. {float(tax):,.2f}",
+            f"Rs. {float(d(inv.get('grand_total'))):,.2f}",
+        ]
+        for w, val in zip(col_widths, row):
+            pdf.cell(w, 6, val, border=1)
+        pdf.ln()
+
+    return bytes(pdf.output())
 # This is what makes an admin view possible: everyone's uploads land in one shared
 # file instead of each browser session having its own private, invisible copy.
 # Caveat: on Streamlit Community Cloud, this file lives on ephemeral disk — it
@@ -773,10 +951,14 @@ if st.session_state.invoices:
     for inv in st.session_state.invoices:
         issues = inv.get("_math_issues", [])
         uncertain = inv.get("uncertain_money_fields", [])
+        gstin_valid, gstin_reason = validate_gstin(inv.get("vendor_gstin", ""))
+        gstin_label = "—" if gstin_valid is None else ("Valid" if gstin_valid else "Invalid")
         rows.append({
             "File": inv.get("_source_file", ""),
             "Customer tag": inv.get("_customer_tag", ""),
             "Vendor": inv.get("vendor_name", ""),
+            "Vendor GSTIN": inv.get("vendor_gstin", "") or "—",
+            "GSTIN Check": gstin_label,
             "Bill No.": inv.get("bill_no", ""),
             "Date": inv.get("date", ""),
             "Subtotal": float(d(inv.get("subtotal"))),
@@ -791,16 +973,21 @@ if st.session_state.invoices:
 
     # style the status column with the ledger stamp badge inline with the paper-panel table
     def _stamp_style(val):
-        if val == "Accurate":
+        if val in ("Accurate", "Valid"):
             return "color: #3F8F5F; font-weight: 600; font-family: 'IBM Plex Mono', monospace;"
-        if val == "Needs review":
+        if val in ("Needs review", "Invalid"):
             return "color: #C1553A; font-weight: 600; font-family: 'IBM Plex Mono', monospace;"
         return ""
 
-    styled_df = df.style.applymap(_stamp_style, subset=["Numbers OK?"]).format(
+    styled_df = df.style.applymap(_stamp_style, subset=["Numbers OK?", "GSTIN Check"]).format(
         {"Subtotal": "₹{:.2f}", "CGST": "₹{:.2f}", "SGST": "₹{:.2f}", "IGST": "₹{:.2f}", "Grand Total": "₹{:.2f}"}
     )
     st.dataframe(styled_df, use_container_width=True)
+
+    n_invalid_gstin = sum(1 for r in rows if r["GSTIN Check"] == "Invalid")
+    if n_invalid_gstin:
+        st.markdown(stamp(f"{n_invalid_gstin} vendor GSTIN(s) fail checksum validation", "flagged"), unsafe_allow_html=True)
+        st.caption("A GSTIN that fails its check-digit is either mistyped on the invoice or the invoice itself is questionable — worth confirming with the vendor.")
 
     # ---------- FLAGGED INVOICES — only for genuine money-accuracy problems.
     # Text fields (customer name/GSTIN, date formatting) never trigger this anymore —
@@ -859,8 +1046,22 @@ if st.session_state.invoices:
     col3.metric("Total GST paid (₹)", f"{total_gst:,.2f}")
     col4.metric("Effective GST rate", f"{(total_gst / total_spend * 100):.2f}%" if total_spend else "—")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["By Vendor", "By HSN Code", "By Item", "Monthly Trend", "Tax Breakdown"]
+    # ---- AI-GENERATED INSIGHTS ----
+    st.markdown('<div class="glass-panel">', unsafe_allow_html=True)
+    st.markdown("**🧠 AI Insights**")
+    insights_key = f"insights_{len(st.session_state.invoices)}"  # regenerate if invoice count changes
+    if st.button("Generate insights", key="gen_insights_btn"):
+        with st.spinner("Reading through the ledger..."):
+            st.session_state[insights_key] = generate_ai_insights(st.session_state.invoices)
+    if insights_key in st.session_state:
+        st.markdown(f"*{st.session_state[insights_key]}*")
+    else:
+        st.caption("Click to have the AI read your data and write a short plain-English summary.")
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.write("")
+
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["By Vendor", "By HSN Code", "By Item", "Monthly Trend", "Tax Breakdown", "⚠️ Anomalies"]
     )
 
     with tab1:
@@ -931,6 +1132,27 @@ if st.session_state.invoices:
         })
         st.bar_chart(tax_df.set_index("Tax type"))
         st.dataframe(tax_df, use_container_width=True)
+
+    with tab6:
+        anomalies = detect_anomalies(st.session_state.invoices)
+        if anomalies:
+            st.markdown(stamp(f"{len(anomalies)} rate(s) above vendor's own historical average", "flagged"),
+                        unsafe_allow_html=True)
+            st.caption("Flagged when a line item's rate is more than 20% above that same vendor's own "
+                       "historical average rate for the identical product — a real overcharge signal, "
+                       "not just a display of the numbers.")
+            anom_df = pd.DataFrame(anomalies).rename(columns={
+                "vendor": "Vendor", "particulars": "Item", "bill_no": "Bill No.", "file": "File",
+                "rate": "Billed Rate (₹)", "avg_rate": "Vendor's Usual Rate (₹)", "pct_over": "% Above Usual",
+            })
+            st.dataframe(
+                anom_df.style.applymap(lambda v: "color: #C1553A; font-weight: 600;", subset=["% Above Usual"])
+                       .format({"Billed Rate (₹)": "₹{:.2f}", "Vendor's Usual Rate (₹)": "₹{:.2f}", "% Above Usual": "+{:.1f}%"}),
+                use_container_width=True
+            )
+        else:
+            st.markdown(stamp("No overcharge patterns detected", "verified"), unsafe_allow_html=True)
+            st.caption("Needs at least 2 invoices with the same item from the same vendor to establish a baseline rate.")
 
     low_conf = df[df["Confidence"] == "low"]
     if not low_conf.empty:
@@ -1134,6 +1356,18 @@ if st.session_state.invoices:
     )
     st.caption("One sheet per vendor (products, rates, GST %, invoice totals + a spend chart), "
                "plus an Overview sheet with vendor-wise GST and spend charts.")
+
+    # ---- PDF STATEMENTS: one professional one-pager per vendor ----
+    st.markdown("**📄 PDF Statements** — a clean, one-page summary per vendor, ready to hand someone directly.")
+    for vname, invs in by_vendor.items():
+        pdf_bytes = generate_vendor_pdf(vname, invs[0].get("vendor_gstin", ""), invs)
+        st.download_button(
+            f"Download PDF — {vname}",
+            data=pdf_bytes,
+            file_name=f"{vname.replace(' ', '_')}_statement.pdf",
+            mime="application/pdf",
+            key=f"pdf_{vname}",
+        )
 
     if not st.session_state.is_admin:
         if st.button("Clear my data"):
