@@ -21,7 +21,143 @@ from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
 
-st.set_page_config(page_title="GST Invoice Extractor", page_icon="🧾", layout="wide")
+st.set_page_config(page_title="Ledger — GST Invoice Intelligence", page_icon="🗒️", layout="wide")
+
+# ============================================================================
+# DESIGN SYSTEM — "The Ledger"
+# Token system:
+#   Color   ink #10151C (bg) / surface #1A222C / paper #F7F2E7 (inset tables only)
+#           brass #C9A468 (primary accent) / verified #3F8F5F / flagged #C1553A
+#           text #EDE7D9 (on ink) / muted #93A0AC
+#   Type    Display: Fraunces (editorial serif, ledger-masthead character)
+#           Body: IBM Plex Sans   Data/numbers: IBM Plex Mono (tabular, aligns decimals)
+#   Layout  Dark ink dashboard with paper-inset panels for tables — evokes a real
+#           ledger book under a desk lamp, not a generic SaaS admin theme.
+#   Signature: rotated ink-stamp badge for Verified/Needs Review, echoing the
+#           "Authorised Signatory" rubber stamps on the real invoices this reads.
+# ============================================================================
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+    --ink: #10151C;
+    --surface: #1A222C;
+    --surface-2: #212B37;
+    --paper: #F7F2E7;
+    --paper-line: #DCD3BD;
+    --brass: #C9A468;
+    --brass-dim: #8A6F49;
+    --verified: #3F8F5F;
+    --flagged: #C1553A;
+    --text: #EDE7D9;
+    --muted: #93A0AC;
+}
+
+/* base canvas */
+.stApp {
+    background: radial-gradient(ellipse 120% 80% at 50% -10%, #1a2431 0%, var(--ink) 55%) !important;
+    color: var(--text);
+}
+[data-testid="stSidebar"] {
+    background: var(--surface) !important;
+    border-right: 1px solid rgba(201,164,104,0.18);
+}
+[data-testid="stHeader"] { background: transparent !important; }
+
+/* typography */
+h1, h2, h3 { font-family: 'Fraunces', serif !important; color: var(--text) !important; letter-spacing: -0.01em; }
+h1 { font-weight: 600 !important; }
+h1::after {
+    content: ""; display: block; width: 64px; height: 2px; margin-top: 14px;
+    background: linear-gradient(90deg, var(--brass), transparent);
+}
+body, p, div, span, label, .stMarkdown { font-family: 'IBM Plex Sans', sans-serif; }
+.stCaption, [data-testid="stCaptionContainer"] { color: var(--muted) !important; font-family: 'IBM Plex Sans', sans-serif; }
+
+/* every number in this app renders in tabular mono — decimals align like a ledger */
+[data-testid="stMetricValue"], [data-testid="stDataFrame"], .stDataFrame,
+[data-testid="stMarkdownContainer"] code {
+    font-family: 'IBM Plex Mono', monospace !important;
+}
+
+/* metric cards -> brass-edged tiles */
+[data-testid="stMetric"] {
+    background: var(--surface-2);
+    border: 1px solid rgba(201,164,104,0.25);
+    border-left: 3px solid var(--brass);
+    border-radius: 6px;
+    padding: 16px 18px 12px 18px;
+}
+[data-testid="stMetricLabel"] { color: var(--muted) !important; font-family: 'IBM Plex Sans'; font-size: 0.8rem !important; text-transform: uppercase; letter-spacing: 0.05em; }
+[data-testid="stMetricValue"] { color: var(--brass) !important; font-weight: 600 !important; }
+
+/* tabs -> ledger index tabs */
+.stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid rgba(201,164,104,0.25); }
+.stTabs [data-baseweb="tab"] {
+    background: transparent; color: var(--muted); font-family: 'IBM Plex Sans'; font-weight: 500;
+    border-radius: 6px 6px 0 0; padding: 10px 18px;
+}
+.stTabs [aria-selected="true"] { color: var(--brass) !important; background: var(--surface-2) !important; border-bottom: 2px solid var(--brass); }
+
+/* buttons */
+.stButton button, .stFormSubmitButton button, .stDownloadButton button {
+    font-family: 'IBM Plex Sans'; font-weight: 600; border-radius: 5px;
+    border: 1px solid var(--brass-dim);
+    background: linear-gradient(180deg, #C9A468 0%, #B08D57 100%);
+    color: #14100A !important;
+    transition: all 0.15s ease;
+}
+.stButton button:hover, .stFormSubmitButton button:hover, .stDownloadButton button:hover {
+    box-shadow: 0 0 0 3px rgba(201,164,104,0.25); border-color: var(--brass);
+}
+
+/* dataframes / tables -> inset paper panel, like a bound ledger page */
+[data-testid="stDataFrame"] {
+    background: var(--paper) !important; border-radius: 4px; padding: 4px;
+    border: 1px solid var(--paper-line);
+}
+
+/* expanders -> case files */
+.streamlit-expanderHeader, [data-testid="stExpander"] {
+    background: var(--surface-2) !important; border: 1px solid rgba(201,164,104,0.2) !important; border-radius: 6px !important;
+}
+
+/* alerts recolored to the palette instead of default red/orange/green */
+[data-testid="stAlertContentWarning"] { color: #E8C9A0 !important; }
+div[data-baseweb="notification"] { border-radius: 6px !important; }
+.stAlert { border-radius: 6px !important; }
+
+/* text inputs / selects */
+.stTextInput input, .stSelectbox div[data-baseweb="select"], .stTextArea textarea {
+    background: var(--surface-2) !important; color: var(--text) !important;
+    border: 1px solid rgba(201,164,104,0.25) !important; border-radius: 5px !important;
+}
+
+/* the signature element: a rotated ink-stamp badge for Verified / Needs Review */
+.ledger-stamp {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 0.78rem;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 4px 12px; border-radius: 999px;
+    transform: rotate(-2deg);
+}
+.ledger-stamp.verified { border: 1.5px solid var(--verified); color: var(--verified); background: rgba(63,143,95,0.08); }
+.ledger-stamp.flagged { border: 1.5px solid var(--flagged); color: var(--flagged); background: rgba(193,85,58,0.08); }
+.ledger-stamp.admin { border: 1.5px solid var(--brass); color: var(--brass); background: rgba(201,164,104,0.1); }
+
+/* masthead divider under the title */
+.ledger-masthead {
+    font-family: 'IBM Plex Mono', monospace; color: var(--muted); font-size: 0.8rem;
+    letter-spacing: 0.08em; text-transform: uppercase; margin-top: -8px; margin-bottom: 18px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+def stamp(label, kind="verified"):
+    """Renders the ink-stamp badge — the app's signature visual element."""
+    return f'<span class="ledger-stamp {kind}">● {label}</span>'
 
 # ---------- CONFIG ----------
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
@@ -265,7 +401,7 @@ if "is_admin" not in st.session_state:
 
 with st.sidebar.expander("🔑 Admin login", expanded=False):
     if st.session_state.is_admin:
-        st.success("Logged in as admin.")
+        st.markdown(stamp("Admin", "admin"), unsafe_allow_html=True)
         if st.button("Log out of admin view"):
             st.session_state.is_admin = False
             st.rerun()
@@ -296,11 +432,11 @@ else:
 
 # ---------- MAIN: ADD INVOICES (upload photo OR type manually) ----------
 if st.session_state.is_admin:
-    st.title("🔐 Admin Dashboard — All Customers")
-    st.caption("Every invoice submitted by every customer, in one place. Use the sidebar filter to zoom into one customer.")
+    st.title("The Ledger — Admin")
+    st.markdown('<div class="ledger-masthead">Every account, one book · filtered by the sidebar</div>', unsafe_allow_html=True)
 else:
-    st.title("GST Invoice Extractor & Analytics")
-    st.caption("Add invoices by photo or by typing them in — both feed the same validated report below.")
+    st.title("The Ledger")
+    st.markdown('<div class="ledger-masthead">GST invoice intelligence, exact to the rupee</div>', unsafe_allow_html=True)
 
     if not customer_name_input:
         st.info("👈 Enter your business name in the sidebar first — this keeps your invoices separate from other customers'.")
@@ -491,10 +627,22 @@ if st.session_state.invoices:
             "IGST": float(d(inv.get("igst_amt"))),
             "Grand Total": float(d(inv.get("grand_total"))),
             "Confidence": inv.get("extraction_confidence", ""),
-            "Numbers OK?": "⚠️ Check" if (issues or uncertain) else "✅ Accurate",
+            "Numbers OK?": "Needs review" if (issues or uncertain) else "Accurate",
         })
     df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True)
+
+    # style the status column with the ledger stamp badge inline with the paper-panel table
+    def _stamp_style(val):
+        if val == "Accurate":
+            return "color: #3F8F5F; font-weight: 600; font-family: 'IBM Plex Mono', monospace;"
+        if val == "Needs review":
+            return "color: #C1553A; font-weight: 600; font-family: 'IBM Plex Mono', monospace;"
+        return ""
+
+    styled_df = df.style.applymap(_stamp_style, subset=["Numbers OK?"]).format(
+        {"Subtotal": "₹{:.2f}", "CGST": "₹{:.2f}", "SGST": "₹{:.2f}", "IGST": "₹{:.2f}", "Grand Total": "₹{:.2f}"}
+    )
+    st.dataframe(styled_df, use_container_width=True)
 
     # ---------- FLAGGED INVOICES — only for genuine money-accuracy problems.
     # Text fields (customer name/GSTIN, date formatting) never trigger this anymore —
@@ -504,13 +652,16 @@ if st.session_state.invoices:
     if any_issues or any_uncertain:
         n_flagged = sum(1 for inv in st.session_state.invoices
                          if inv.get("_math_issues") or inv.get("uncertain_money_fields"))
-        st.warning(f"{n_flagged} of {len(st.session_state.invoices)} invoice(s) have a money figure "
-                    "worth double-checking against the photo. Everything else below is accurate as extracted.")
+        st.markdown(
+            stamp(f"{n_flagged} of {len(st.session_state.invoices)} need review", "flagged"),
+            unsafe_allow_html=True
+        )
+        st.caption("Everything else is accurate as extracted — nothing here is auto-corrected, only flagged.")
         for inv in st.session_state.invoices:
             issues = inv.get("_math_issues", [])
             uncertain = inv.get("uncertain_money_fields", [])
             if issues or uncertain:
-                with st.expander(f"⚠️ {inv.get('_source_file','')} — {inv.get('vendor_name','')} "
+                with st.expander(f"{inv.get('_source_file','')} — {inv.get('vendor_name','')} "
                                   f"(Bill {inv.get('bill_no','')})", expanded=False):
                     if issues:
                         st.markdown("**Math discrepancies (recomputed independently, exact decimal math):**")
@@ -520,6 +671,8 @@ if st.session_state.invoices:
                         st.markdown("**Money figures the model wasn't fully confident reading:**")
                         st.markdown(f"- {', '.join(uncertain)}")
                     st.caption("Open the original photo and correct these manually before relying on this invoice's totals.")
+    else:
+        st.markdown(stamp("All figures verified", "verified"), unsafe_allow_html=True)
 
     # ---------- LINE ITEM DETAIL ----------
     with st.expander("View line-item detail per invoice"):
