@@ -123,10 +123,22 @@ body, p, div, span, label, .stMarkdown { font-family: 'IBM Plex Sans', sans-seri
     background: var(--surface-2) !important; border: 1px solid rgba(201,164,104,0.2) !important; border-radius: 6px !important;
 }
 
-/* alerts recolored to the palette instead of default red/orange/green */
-[data-testid="stAlertContentWarning"] { color: #E8C9A0 !important; }
-div[data-baseweb="notification"] { border-radius: 6px !important; }
-.stAlert { border-radius: 6px !important; }
+/* alerts recolored to the ledger palette instead of Streamlit's default blue/orange/green */
+div[data-testid="stAlert"], div[data-baseweb="notification"], .stAlert {
+    border-radius: 6px !important;
+    border: 1px solid rgba(201,164,104,0.3) !important;
+    background: var(--surface-2) !important;
+}
+div[data-testid="stAlert"] p, div[data-testid="stAlert"] span,
+div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] {
+    color: var(--text) !important;
+    font-family: 'IBM Plex Sans', sans-serif !important;
+}
+div[data-testid="stAlert"] svg { fill: var(--brass) !important; }
+/* warning-toned alerts lean rust, success-toned lean verified-green, matching the stamp badges */
+div[data-testid="stAlert"]:has(svg[data-icon="warning"]) { border-left: 3px solid var(--flagged) !important; }
+div[data-testid="stAlert"]:has(svg[data-icon="check"]) { border-left: 3px solid var(--verified) !important; }
+div[data-testid="stAlert"]:has(svg[data-icon="info"]) { border-left: 3px solid var(--brass) !important; }
 
 /* text inputs / selects */
 .stTextInput input, .stSelectbox div[data-baseweb="select"], .stTextArea textarea {
@@ -151,6 +163,119 @@ div[data-baseweb="notification"] { border-radius: 6px !important; }
     font-family: 'IBM Plex Mono', monospace; color: var(--muted); font-size: 0.8rem;
     letter-spacing: 0.08em; text-transform: uppercase; margin-top: -8px; margin-bottom: 18px;
 }
+
+/* ============================================================================
+   FUTURISTIC LAYER — glassmorphism, glow, 3D depth
+   Adds: animated mesh backdrop, glass panels with real depth (blur + inner glow),
+   numbered section eyebrows to break the page into distinct zones, and a tilt-on-hover
+   3D interaction for cards, on top of the existing ledger palette/typography.
+   ============================================================================ */
+
+@keyframes meshDrift {
+    0%   { transform: translate(0%, 0%) rotate(0deg); }
+    50%  { transform: translate(-4%, 3%) rotate(6deg); }
+    100% { transform: translate(0%, 0%) rotate(0deg); }
+}
+.stApp::before {
+    content: ""; position: fixed; inset: -20%; z-index: 0; pointer-events: none;
+    background:
+        radial-gradient(circle at 15% 20%, rgba(201,164,104,0.10) 0%, transparent 35%),
+        radial-gradient(circle at 85% 15%, rgba(63,143,214,0.08) 0%, transparent 40%),
+        radial-gradient(circle at 50% 90%, rgba(63,143,95,0.06) 0%, transparent 45%);
+    animation: meshDrift 22s ease-in-out infinite;
+}
+[data-testid="stAppViewContainer"] { position: relative; z-index: 1; }
+
+/* glass panel — the base surface for section content */
+.glass-panel {
+    background: linear-gradient(180deg, rgba(33,43,55,0.55) 0%, rgba(26,34,44,0.55) 100%);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid rgba(201,164,104,0.22);
+    border-radius: 14px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
+    padding: 22px 26px;
+    margin-bottom: 4px;
+}
+
+/* section eyebrow — numbered zone marker, gives the page distinct "sections" */
+.section-eyebrow {
+    display: flex; align-items: center; gap: 12px; margin: 38px 0 6px 0;
+}
+.section-eyebrow .num {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; font-weight: 600;
+    color: var(--ink); background: linear-gradient(135deg, var(--brass), #E0C48C);
+    padding: 3px 9px; border-radius: 4px; letter-spacing: 0.05em;
+    box-shadow: 0 0 16px rgba(201,164,104,0.45);
+}
+.section-eyebrow .label {
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; color: var(--muted);
+    letter-spacing: 0.12em; text-transform: uppercase;
+}
+.section-eyebrow .rule {
+    flex: 1; height: 1px;
+    background: linear-gradient(90deg, rgba(201,164,104,0.4), transparent);
+}
+
+/* metric tiles get real 3D depth + hover tilt */
+[data-testid="stMetric"] {
+    transform-style: preserve-3d; perspective: 800px;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+    background: linear-gradient(155deg, rgba(33,43,55,0.75), rgba(26,34,44,0.6)) !important;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+[data-testid="stMetric"]:hover {
+    transform: translateY(-3px) rotateX(4deg);
+    box-shadow: 0 14px 32px rgba(201,164,104,0.18), inset 0 1px 0 rgba(255,255,255,0.08);
+    border-color: rgba(201,164,104,0.5) !important;
+}
+
+/* expanders as glass cards with hover glow */
+[data-testid="stExpander"] {
+    background: linear-gradient(155deg, rgba(33,43,55,0.6), rgba(26,34,44,0.5)) !important;
+    backdrop-filter: blur(10px);
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+[data-testid="stExpander"]:hover { border-color: rgba(201,164,104,0.45) !important; box-shadow: 0 0 24px rgba(201,164,104,0.08); }
+
+/* the 3D holographic cube in the hero */
+.hero-3d-wrap {
+    display: flex; align-items: center; justify-content: center; height: 200px;
+    perspective: 1000px;
+}
+.hero-cube {
+    position: relative; width: 84px; height: 84px; transform-style: preserve-3d;
+    animation: cubeSpin 14s linear infinite;
+}
+.hero-cube .face {
+    position: absolute; width: 84px; height: 84px;
+    border: 1px solid rgba(201,164,104,0.65);
+    background: linear-gradient(135deg, rgba(201,164,104,0.14), rgba(63,143,214,0.08));
+    box-shadow: inset 0 0 24px rgba(201,164,104,0.15);
+}
+.hero-cube .front  { transform: translateZ(42px); }
+.hero-cube .back   { transform: rotateY(180deg) translateZ(42px); }
+.hero-cube .right  { transform: rotateY(90deg) translateZ(42px); }
+.hero-cube .left   { transform: rotateY(-90deg) translateZ(42px); }
+.hero-cube .top    { transform: rotateX(90deg) translateZ(42px); }
+.hero-cube .bottom { transform: rotateX(-90deg) translateZ(42px); }
+@keyframes cubeSpin {
+    0%   { transform: rotateX(0deg) rotateY(0deg); }
+    100% { transform: rotateX(360deg) rotateY(360deg); }
+}
+
+@keyframes scanline {
+    0% { transform: translateY(-100%); opacity: 0; }
+    10% { opacity: 0.5; }
+    90% { opacity: 0.5; }
+    100% { transform: translateY(2100%); opacity: 0; }
+}
+.hero-scan {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--brass), transparent);
+    animation: scanline 5s linear infinite;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -158,6 +283,35 @@ div[data-baseweb="notification"] { border-radius: 6px !important; }
 def stamp(label, kind="verified"):
     """Renders the ink-stamp badge — the app's signature visual element."""
     return f'<span class="ledger-stamp {kind}">● {label}</span>'
+
+
+def section(num, label):
+    """Numbered section eyebrow — breaks the page into distinct visual zones."""
+    st.markdown(
+        f'<div class="section-eyebrow"><span class="num">{num}</span>'
+        f'<span class="label">{label}</span><span class="rule"></span></div>',
+        unsafe_allow_html=True
+    )
+
+
+def render_hero():
+    """The futuristic hero: a rotating CSS 3D cube behind the title, with a scanning
+    glow line sweeping through — pure CSS, no external JS/WebGL dependency."""
+    st.markdown("""
+        <div class="glass-panel" style="position:relative; overflow:hidden; padding:0;">
+            <div class="hero-scan"></div>
+            <div class="hero-3d-wrap">
+                <div class="hero-cube">
+                    <div class="face front"></div>
+                    <div class="face back"></div>
+                    <div class="face right"></div>
+                    <div class="face left"></div>
+                    <div class="face top"></div>
+                    <div class="face bottom"></div>
+                </div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
 # ---------- CONFIG ----------
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
@@ -392,7 +546,7 @@ def delete_all_for_customer(customer_tag):
 init_db()
 
 # ---------- SIDEBAR: IDENTITY + MODE ----------
-st.sidebar.title("🧾 GST Extractor")
+st.sidebar.title("🗒️ The Ledger")
 
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
 
@@ -431,6 +585,8 @@ else:
     customer_name_input = st.sidebar.text_input("Your business / customer name", "").strip()
 
 # ---------- MAIN: ADD INVOICES (upload photo OR type manually) ----------
+render_hero()
+
 if st.session_state.is_admin:
     st.title("The Ledger — Admin")
     st.markdown('<div class="ledger-masthead">Every account, one book · filtered by the sidebar</div>', unsafe_allow_html=True)
@@ -443,6 +599,7 @@ else:
         st.stop()
 
 if not st.session_state.is_admin:
+    section("01", "Capture")
     tab_upload, tab_manual = st.tabs(["📷 Upload Photo(s)", "⌨️ Enter Manually"])
 
     with tab_upload:
@@ -609,6 +766,7 @@ else:
 
 # ---------- RESULTS TABLE ----------
 if st.session_state.invoices:
+    section("02", "Ledger")
     st.subheader("Extracted invoices")
 
     rows = []
@@ -685,6 +843,7 @@ if st.session_state.invoices:
                 st.caption("No line items extracted.")
 
     # ---------- ANALYTICS ----------
+    section("03", "Analytics")
     st.subheader("Analytics")
 
     # exact Decimal totals for headline metrics — summed before any float conversion
@@ -779,6 +938,7 @@ if st.session_state.invoices:
                     "against the original photo.")
 
     # ---------- EXPORT ----------
+    section("04", "Export")
     st.subheader("Export")
 
     import openpyxl
