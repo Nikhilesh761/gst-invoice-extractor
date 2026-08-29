@@ -278,6 +278,97 @@ div[data-testid="stAlert"]:has(svg[data-icon="info"]) { border-left: 3px solid v
     background: linear-gradient(90deg, transparent, var(--brass), transparent);
     animation: scanline 5s linear infinite;
 }
+
+/* ============================================================================
+   REFINEMENT PASS — frame the page like a designed product, not a default
+   Streamlit stack: constrained content width, animated gradient title, glass
+   forms/dropzones, custom scrollbar, and motion on every interactive control.
+   ============================================================================ */
+
+/* constrain + center content instead of full-bleed default Streamlit */
+.block-container {
+    max-width: 1180px; margin: 0 auto; padding-top: 2.2rem !important;
+}
+
+/* animated gradient sweep on the main title, instead of flat text */
+@keyframes titleSweep {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+h1 {
+    background: linear-gradient(100deg, var(--text) 20%, var(--brass) 45%, #E0C48C 55%, var(--text) 80%);
+    background-size: 220% auto;
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    animation: titleSweep 8s ease-in-out infinite;
+}
+h1::after { background: linear-gradient(90deg, var(--brass), transparent) !important; -webkit-text-fill-color: initial; }
+
+/* file uploader dropzone -> glass panel with dashed brass border, glows on hover/drag */
+[data-testid="stFileUploaderDropzone"] {
+    background: linear-gradient(155deg, rgba(33,43,55,0.6), rgba(26,34,44,0.4)) !important;
+    border: 1.5px dashed rgba(201,164,104,0.45) !important;
+    border-radius: 12px !important;
+    backdrop-filter: blur(10px);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+[data-testid="stFileUploaderDropzone"]:hover {
+    border-color: var(--brass) !important;
+    box-shadow: 0 0 28px rgba(201,164,104,0.15);
+}
+
+/* forms as glass panels, matching the rest of the depth language */
+[data-testid="stForm"] {
+    background: linear-gradient(155deg, rgba(33,43,55,0.55), rgba(26,34,44,0.45)) !important;
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(201,164,104,0.2) !important;
+    border-radius: 14px !important;
+    padding: 22px 24px !important;
+}
+
+/* data editor (manual entry table) themed to match, not default white grid */
+[data-testid="stDataFrameResizable"], .stDataEditor {
+    border-radius: 8px !important; overflow: hidden;
+}
+
+/* inputs get a glow on focus instead of the default blue outline */
+.stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox div[data-baseweb="select"]:focus-within {
+    border-color: var(--brass) !important;
+    box-shadow: 0 0 0 3px rgba(201,164,104,0.18) !important;
+    outline: none !important;
+}
+
+/* selectbox dropdown menu themed dark instead of default white */
+div[data-baseweb="popover"] ul, div[data-baseweb="menu"] {
+    background: var(--surface-2) !important; border: 1px solid rgba(201,164,104,0.25) !important;
+}
+div[data-baseweb="popover"] li { color: var(--text) !important; }
+div[data-baseweb="popover"] li:hover { background: rgba(201,164,104,0.15) !important; }
+
+/* progress bar recolored to brass */
+[data-testid="stProgress"] > div > div > div { background: linear-gradient(90deg, var(--brass), #E0C48C) !important; }
+
+/* custom scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--ink); }
+::-webkit-scrollbar-thumb { background: rgba(201,164,104,0.35); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(201,164,104,0.55); }
+
+/* subtle fade-up entrance for the hero + first section */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.glass-panel { animation: fadeUp 0.6s ease both; }
+
+/* tabs get a glow underline sweep on the active tab */
+.stTabs [aria-selected="true"] { box-shadow: 0 2px 12px rgba(201,164,104,0.25); }
+
+/* sidebar section divider */
+.sidebar-divider {
+    height: 1px; margin: 18px 0;
+    background: linear-gradient(90deg, transparent, rgba(201,164,104,0.4), transparent);
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -747,7 +838,7 @@ with st.sidebar.expander("🔑 Admin login", expanded=False):
                 st.error("Incorrect password.")
 
 if st.session_state.is_admin:
-    st.sidebar.markdown("---")
+    st.sidebar.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
     st.sidebar.subheader("Admin view")
     all_customer_tags = sorted(set(
         r[0] for r in sqlite3.connect(DB_PATH).execute(
@@ -759,6 +850,7 @@ if st.session_state.is_admin:
     )
     customer_name_input = None  # not used in admin mode
 else:
+    st.sidebar.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
     st.sidebar.markdown("Enter your business name below — this identifies which invoices are yours.")
     customer_name_input = st.sidebar.text_input("Your business / customer name", "").strip()
 
@@ -837,7 +929,7 @@ if not st.session_state.is_admin:
             edited_items = st.data_editor(
                 st.session_state.manual_line_items,
                 num_rows="dynamic",
-                width="stretch",
+                use_container_width=True,
                 column_config={
                     "particulars": st.column_config.TextColumn("Particulars"),
                     "hsn_code": st.column_config.TextColumn("HSN Code"),
@@ -979,10 +1071,10 @@ if st.session_state.invoices:
             return "color: #C1553A; font-weight: 600; font-family: 'IBM Plex Mono', monospace;"
         return ""
 
-    styled_df = df.style.map(_stamp_style, subset=["Numbers OK?", "GSTIN Check"]).format(
+    styled_df = df.style.applymap(_stamp_style, subset=["Numbers OK?", "GSTIN Check"]).format(
         {"Subtotal": "₹{:.2f}", "CGST": "₹{:.2f}", "SGST": "₹{:.2f}", "IGST": "₹{:.2f}", "Grand Total": "₹{:.2f}"}
     )
-    st.dataframe(styled_df, width="stretch")
+    st.dataframe(styled_df, use_container_width=True)
 
     n_invalid_gstin = sum(1 for r in rows if r["GSTIN Check"] == "Invalid")
     if n_invalid_gstin:
@@ -1068,7 +1160,7 @@ if st.session_state.invoices:
         vendor_summary = df.groupby("Vendor")["Grand Total"].sum().sort_values(ascending=False)
         st.bar_chart(vendor_summary)
         st.dataframe(vendor_summary.reset_index().rename(columns={"Grand Total": "Total Spend (₹)"}),
-                     width="stretch")
+                     use_container_width=True)
 
     with tab2:
         hsn_rows = []
@@ -1083,7 +1175,7 @@ if st.session_state.invoices:
             hsn_summary = hsn_df.groupby("HSN Code")["Amount"].sum().sort_values(ascending=False)
             st.bar_chart(hsn_summary)
             st.dataframe(hsn_summary.reset_index().rename(columns={"Amount": "Total Amount (₹)"}),
-                         width="stretch")
+                         use_container_width=True)
         else:
             st.caption("No line items to break down yet.")
 
@@ -1109,7 +1201,7 @@ if st.session_state.invoices:
                     Avg_Rate=("Rate", "mean"),
                     Total_Amount=("Amount", "sum"),
                 ).reset_index().sort_values("Total_Amount", ascending=False),
-                width="stretch",
+                use_container_width=True,
             )
         else:
             st.caption("No line items to break down yet.")
@@ -1131,7 +1223,7 @@ if st.session_state.invoices:
             "Amount (₹)": [float(total_cgst), float(total_sgst), float(total_igst)],
         })
         st.bar_chart(tax_df.set_index("Tax type"))
-        st.dataframe(tax_df, width="stretch")
+        st.dataframe(tax_df, use_container_width=True)
 
     with tab6:
         anomalies = detect_anomalies(st.session_state.invoices)
@@ -1146,9 +1238,9 @@ if st.session_state.invoices:
                 "rate": "Billed Rate (₹)", "avg_rate": "Vendor's Usual Rate (₹)", "pct_over": "% Above Usual",
             })
             st.dataframe(
-                anom_df.style.map(lambda v: "color: #C1553A; font-weight: 600;", subset=["% Above Usual"])
+                anom_df.style.applymap(lambda v: "color: #C1553A; font-weight: 600;", subset=["% Above Usual"])
                        .format({"Billed Rate (₹)": "₹{:.2f}", "Vendor's Usual Rate (₹)": "₹{:.2f}", "% Above Usual": "+{:.1f}%"}),
-                width="stretch"
+                use_container_width=True
             )
         else:
             st.markdown(stamp("No overcharge patterns detected", "verified"), unsafe_allow_html=True)
