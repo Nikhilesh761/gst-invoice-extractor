@@ -23,6 +23,8 @@ from fpdf import FPDF
 import statistics
 import time
 import io
+import time
+import threading
 
 st.set_page_config(page_title="Ledger — GST Invoice Intelligence", page_icon="🗒️", layout="wide")
 
@@ -432,20 +434,19 @@ if not API_KEYS:
 
 
 def get_model():
-    """Returns a model instance configured with the currently active key.
-    Reads the active index from the shared DB, not session state — key exhaustion
-    is global (Google account level), so every user must see the same rotation state."""
+    """Return a model configured with the currently active key and stable free-tier model."""
     idx = get_active_key_index() % len(API_KEYS)
     genai.configure(api_key=API_KEYS[idx])
-    return genai.GenerativeModel("gemini-3.6-flash")
+    model_name = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
+    return genai.GenerativeModel(model_name)
 
 
 def rotate_to_next_key():
-    """Advances to the next key in the shared pool. Returns False if every key has
-    already been tried (all exhausted) so the caller knows not to keep retrying."""
+    """Advance to the next key; return False when all configured keys are exhausted."""
     next_idx = get_active_key_index() + 1
     set_active_key_index(next_idx)
     return next_idx < len(API_KEYS)
+
 
 EXTRACTION_PROMPT = """You are reading a handwritten or printed Indian GST tax invoice photo.
 Extract every field into STRICT JSON only — no markdown fences, no commentary, no rounding.
@@ -632,21 +633,21 @@ def extract_one(uf_name, pil_img, customer_tag, max_retries_per_key=2):
                 if _is_rate_limit_error(e):
                     last_error = e
                     if attempt < max_retries_per_key - 1:
-                        time.sleep(2 ** (attempt + 1))  # 2s, 4s backoff for the per-minute cap
+                        time.sleep(2 ** (attempt + 1))
                         continue
-                    break  # this key is done for now — fall through to rotate
-                raise  # a real parsing/other error — don't mask it as rate limiting
+                    break
+                raise
 
         keys_tried += 1
-        has_more = rotate_to_next_key()
-        if not has_more:
+        if not rotate_to_next_key():
             break
 
     raise RateLimitError(
         f"All {len(API_KEYS)} configured Gemini key(s) are currently rate-limited "
-        "(free tier: ~5 requests/minute, ~20/day per key). Wait a few minutes, or add "
-        "another GEMINI_API_KEY_N in Secrets for more headroom."
+        "(free tier: about 5 requests/minute and 20/day per key). Wait a few minutes, "
+        "or add another GEMINI_API_KEY_N in Secrets for automatic fallback."
     ) from last_error
+
 
 
 # ============================================================================
@@ -757,6 +758,7 @@ Per-vendor breakdown:
 {chr(10).join(stats_lines)}
 """
     resp = get_model().generate_content(prompt)
+
     return resp.text.strip()
 
 
@@ -985,30 +987,21 @@ if not st.session_state.is_admin:
             done = 0
             rate_limited = False
 
-            # Gemini 3.6 Flash free tier: only ~5 requests/minute AND ~20/day per key
-            # (verified from the actual quota dashboard). 2 concurrent workers keeps a
-            # single key under the per-minute cap; extract_one() itself retries with
-            # backoff and rotates through any additional GEMINI_API_KEY_N keys in Secrets
-            # before finally giving up.
-            MAX_WORKERS = min(2, total)
-
-            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                futures = {
-                    executor.submit(extract_one, uf.name, Image.open(uf), customer_name_input): uf.name
-                    for uf in uploaded_files
-                }
-                for future in as_completed(futures):
-                    fname = futures[future]
-                    try:
-                        data = future.result()
-                        save_invoice_to_db(data)
-                    except RateLimitError as e:
-                        st.error(f"⚠️ {fname}: {e}")
-                        rate_limited = True
-                    except Exception as e:
-                        st.warning(f"Could not parse {fname}: {e}")
-                    done += 1
-                    progress.progress(done / total, text=f"Processed {done}/{total}...")
+            # Serialize requests to prevent a batch upload from bursting through
+            # Gemini's per-minute quota. extract_one() retries and rotates keys.
+            for uf in uploaded_files:
+                fname = uf.name
+                try:
+                    data = extract_one(fname, Image.open(uf), customer_name_input)
+                    save_invoice_to_db(data)
+                except RateLimitError as e:
+                    st.error(f"⚠️ {fname}: {e}")
+                    rate_limited = True
+                    break
+                except Exception as e:
+                    st.warning(f"Could not parse {fname}: {e}")
+                done += 1
+                progress.progress(done / total, text=f"Processed {done}/{total}...")
 
             progress.progress(1.0, text="Done.")
             if rate_limited:
