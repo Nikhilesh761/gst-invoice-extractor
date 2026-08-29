@@ -21,6 +21,7 @@ from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from fpdf import FPDF
 import statistics
+import time
 import io
 
 st.set_page_config(page_title="Ledger — GST Invoice Intelligence", page_icon="🗒️", layout="wide")
@@ -406,15 +407,45 @@ def render_hero():
         </section>
     """, unsafe_allow_html=True)
 
-# ---------- CONFIG ----------
-API_KEY = st.secrets.get("GEMINI_API_KEY", "")
-if not API_KEY:
+# ---------- CONFIG: multi-key pool with automatic fallback ----------
+# Reads GEMINI_API_KEY, GEMINI_API_KEY_2, GEMINI_API_KEY_3, ... from secrets.
+# When a key hits its rate limit (5/min or 20/day on free tier), the app rotates
+# to the next key automatically instead of failing. Each key needs its own free
+# Google account + its own key at aistudio.google.com/app/apikey.
+API_KEYS = []
+primary = st.secrets.get("GEMINI_API_KEY", "")
+if primary:
+    API_KEYS.append(primary)
+i = 2
+while True:
+    k = st.secrets.get(f"GEMINI_API_KEY_{i}", "")
+    if not k:
+        break
+    API_KEYS.append(k)
+    i += 1
+
+if not API_KEYS:
     st.error("No GEMINI_API_KEY found in secrets. Add it in .streamlit/secrets.toml (local) "
               "or your Streamlit Cloud app's Secrets settings.")
     st.stop()
 
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-3.6-flash")
+
+
+def get_model():
+    """Returns a model instance configured with the currently active key.
+    Reads the active index from the shared DB, not session state — key exhaustion
+    is global (Google account level), so every user must see the same rotation state."""
+    idx = get_active_key_index() % len(API_KEYS)
+    genai.configure(api_key=API_KEYS[idx])
+    return genai.GenerativeModel("gemini-3.6-flash")
+
+
+def rotate_to_next_key():
+    """Advances to the next key in the shared pool. Returns False if every key has
+    already been tried (all exhausted) so the caller knows not to keep retrying."""
+    next_idx = get_active_key_index() + 1
+    set_active_key_index(next_idx)
+    return next_idx < len(API_KEYS)
 
 EXTRACTION_PROMPT = """You are reading a handwritten or printed Indian GST tax invoice photo.
 Extract every field into STRICT JSON only — no markdown fences, no commentary, no rounding.
@@ -562,21 +593,60 @@ def prep_image_for_upload(pil_img, max_dimension=1600):
     return img
 
 
-def extract_one(uf_name, pil_img, customer_tag):
-    """Runs one extraction call. Built as a standalone function so multiple
-    uploads can run concurrently instead of one-by-one."""
+class RateLimitError(Exception):
+    """Raised only when EVERY key in the pool is exhausted, so the UI can show a
+    clear, specific message instead of a generic parse error."""
+    pass
+
+
+def _is_rate_limit_error(e):
+    msg = str(e)
+    return "429" in msg or "quota" in msg.lower() or "rate limit" in msg.lower() or "ResourceExhausted" in msg
+
+
+def extract_one(uf_name, pil_img, customer_tag, max_retries_per_key=2):
+    """Runs one extraction call. On a rate limit, retries briefly with backoff (helps
+    with the per-minute cap), and if that key is truly exhausted (daily cap), rotates
+    to the next key in the pool automatically and keeps going. Only raises
+    RateLimitError once every available key has been tried and failed."""
     img = prep_image_for_upload(pil_img)
-    resp = model.generate_content([EXTRACTION_PROMPT, img])
-    raw = resp.text.strip()
-    if raw.startswith("```"):
-        raw = raw.strip("`")
-        raw = raw.replace("json\n", "", 1) if raw.startswith("json\n") else raw
-    data = json.loads(raw)
-    data["_source_file"] = uf_name
-    data["_uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    data["_customer_tag"] = customer_tag
-    data["_math_issues"] = verify_invoice_math(data)
-    return data
+
+    keys_tried = 0
+    last_error = None
+    while keys_tried < len(API_KEYS):
+        current_model = get_model()
+        for attempt in range(max_retries_per_key):
+            try:
+                resp = current_model.generate_content([EXTRACTION_PROMPT, img])
+                raw = resp.text.strip()
+                if raw.startswith("```"):
+                    raw = raw.strip("`")
+                    raw = raw.replace("json\n", "", 1) if raw.startswith("json\n") else raw
+                data = json.loads(raw)
+                data["_source_file"] = uf_name
+                data["_uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                data["_customer_tag"] = customer_tag
+                data["_math_issues"] = verify_invoice_math(data)
+                return data
+            except Exception as e:
+                if _is_rate_limit_error(e):
+                    last_error = e
+                    if attempt < max_retries_per_key - 1:
+                        time.sleep(2 ** (attempt + 1))  # 2s, 4s backoff for the per-minute cap
+                        continue
+                    break  # this key is done for now — fall through to rotate
+                raise  # a real parsing/other error — don't mask it as rate limiting
+
+        keys_tried += 1
+        has_more = rotate_to_next_key()
+        if not has_more:
+            break
+
+    raise RateLimitError(
+        f"All {len(API_KEYS)} configured Gemini key(s) are currently rate-limited "
+        "(free tier: ~5 requests/minute, ~20/day per key). Wait a few minutes, or add "
+        "another GEMINI_API_KEY_N in Secrets for more headroom."
+    ) from last_error
 
 
 # ============================================================================
@@ -686,7 +756,7 @@ Total GST paid: ₹{total_gst}
 Per-vendor breakdown:
 {chr(10).join(stats_lines)}
 """
-    resp = model.generate_content(prompt)
+    resp = get_model().generate_content(prompt)
     return resp.text.strip()
 
 
@@ -778,6 +848,32 @@ def init_db():
             data_json TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def get_active_key_index():
+    """Shared across every user of the app — quota exhaustion happens at Google's
+    account level, not per browser session, so rotation state must be global too."""
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT value FROM app_settings WHERE key = 'active_gemini_key_index'").fetchone()
+    conn.close()
+    return int(row[0]) if row else 0
+
+
+def set_active_key_index(idx):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES ('active_gemini_key_index', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (str(idx),)
+    )
     conn.commit()
     conn.close()
 
@@ -816,6 +912,10 @@ init_db()
 
 # ---------- SIDEBAR: IDENTITY + MODE ----------
 st.sidebar.title("🗒️ The Ledger")
+
+if len(API_KEYS) > 1:
+    active_idx = get_active_key_index()
+    st.sidebar.caption(f"🔑 API key {active_idx + 1} of {len(API_KEYS)} active")
 
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
 
@@ -883,10 +983,14 @@ if not st.session_state.is_admin:
             progress = st.progress(0, text="Starting extraction...")
             total = len(uploaded_files)
             done = 0
+            rate_limited = False
 
-            # Free-tier Gemini allows ~15-30 requests/min — 4 concurrent workers is a safe
-            # speed-up without tripping rate limits. Raise this only if you're on a paid tier.
-            MAX_WORKERS = min(4, total)
+            # Gemini 3.6 Flash free tier: only ~5 requests/minute AND ~20/day per key
+            # (verified from the actual quota dashboard). 2 concurrent workers keeps a
+            # single key under the per-minute cap; extract_one() itself retries with
+            # backoff and rotates through any additional GEMINI_API_KEY_N keys in Secrets
+            # before finally giving up.
+            MAX_WORKERS = min(2, total)
 
             with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 futures = {
@@ -898,13 +1002,25 @@ if not st.session_state.is_admin:
                     try:
                         data = future.result()
                         save_invoice_to_db(data)
+                    except RateLimitError as e:
+                        st.error(f"⚠️ {fname}: {e}")
+                        rate_limited = True
                     except Exception as e:
                         st.warning(f"Could not parse {fname}: {e}")
                     done += 1
                     progress.progress(done / total, text=f"Processed {done}/{total}...")
 
             progress.progress(1.0, text="Done.")
-            st.success(f"Processed {total} invoice(s).")
+            if rate_limited:
+                n_keys = len(API_KEYS)
+                if n_keys > 1:
+                    st.info(f"All {n_keys} configured API keys hit their rate limit. Wait a few minutes "
+                            "for the per-minute limit to clear, or wait for the daily reset.")
+                else:
+                    st.info("Hit Gemini's free-tier limit (5/min or 20/day). Wait a minute and retry, "
+                            "or add a second GEMINI_API_KEY_2 in Secrets for automatic fallback.")
+            else:
+                st.success(f"Processed {total} invoice(s).")
             st.rerun()
 
     with tab_manual:
