@@ -285,12 +285,10 @@ div[data-testid="stAlert"]:has(svg[data-icon="info"]) { border-left: 3px solid v
    forms/dropzones, custom scrollbar, and motion on every interactive control.
    ============================================================================ */
 
-/* constrain + center content instead of full-bleed default Streamlit */
 .block-container {
-    max-width: 1180px; margin: 0 auto; padding-top: 2.2rem !important;
+    max-width: 1180px; margin: 0 auto; padding-top: 2.2rem !important; padding-bottom: 4rem;
 }
 
-/* animated gradient sweep on the main title, instead of flat text */
 @keyframes titleSweep {
     0%   { background-position: 0% 50%; }
     50%  { background-position: 100% 50%; }
@@ -304,7 +302,6 @@ h1 {
 }
 h1::after { background: linear-gradient(90deg, var(--brass), transparent) !important; -webkit-text-fill-color: initial; }
 
-/* file uploader dropzone -> glass panel with dashed brass border, glows on hover/drag */
 [data-testid="stFileUploaderDropzone"] {
     background: linear-gradient(155deg, rgba(33,43,55,0.6), rgba(26,34,44,0.4)) !important;
     border: 1.5px dashed rgba(201,164,104,0.45) !important;
@@ -312,63 +309,62 @@ h1::after { background: linear-gradient(90deg, var(--brass), transparent) !impor
     backdrop-filter: blur(10px);
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-[data-testid="stFileUploaderDropzone"]:hover {
-    border-color: var(--brass) !important;
-    box-shadow: 0 0 28px rgba(201,164,104,0.15);
-}
-
-/* forms as glass panels, matching the rest of the depth language */
+[data-testid="stFileUploaderDropzone"]:hover { border-color: var(--brass) !important; box-shadow: 0 0 28px rgba(201,164,104,0.15); }
 [data-testid="stForm"] {
     background: linear-gradient(155deg, rgba(33,43,55,0.55), rgba(26,34,44,0.45)) !important;
-    backdrop-filter: blur(14px);
-    border: 1px solid rgba(201,164,104,0.2) !important;
-    border-radius: 14px !important;
-    padding: 22px 24px !important;
+    backdrop-filter: blur(14px); border: 1px solid rgba(201,164,104,0.2) !important;
+    border-radius: 14px !important; padding: 22px 24px !important;
 }
-
-/* data editor (manual entry table) themed to match, not default white grid */
-[data-testid="stDataFrameResizable"], .stDataEditor {
-    border-radius: 8px !important; overflow: hidden;
-}
-
-/* inputs get a glow on focus instead of the default blue outline */
+[data-testid="stDataFrameResizable"], .stDataEditor { border-radius: 8px !important; overflow: hidden; }
 .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox div[data-baseweb="select"]:focus-within {
-    border-color: var(--brass) !important;
-    box-shadow: 0 0 0 3px rgba(201,164,104,0.18) !important;
-    outline: none !important;
+    border-color: var(--brass) !important; box-shadow: 0 0 0 3px rgba(201,164,104,0.18) !important; outline: none !important;
 }
-
-/* selectbox dropdown menu themed dark instead of default white */
-div[data-baseweb="popover"] ul, div[data-baseweb="menu"] {
-    background: var(--surface-2) !important; border: 1px solid rgba(201,164,104,0.25) !important;
-}
+div[data-baseweb="popover"] ul, div[data-baseweb="menu"] { background: var(--surface-2) !important; border: 1px solid rgba(201,164,104,0.25) !important; }
 div[data-baseweb="popover"] li { color: var(--text) !important; }
 div[data-baseweb="popover"] li:hover { background: rgba(201,164,104,0.15) !important; }
-
-/* progress bar recolored to brass */
 [data-testid="stProgress"] > div > div > div { background: linear-gradient(90deg, var(--brass), #E0C48C) !important; }
-
-/* custom scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--ink); }
 ::-webkit-scrollbar-thumb { background: rgba(201,164,104,0.35); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(201,164,104,0.55); }
-
-/* subtle fade-up entrance for the hero + first section */
-@keyframes fadeUp {
-    from { opacity: 0; transform: translateY(14px); }
-    to { opacity: 1; transform: translateY(0); }
-}
+@keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 .glass-panel { animation: fadeUp 0.6s ease both; }
-
-/* tabs get a glow underline sweep on the active tab */
 .stTabs [aria-selected="true"] { box-shadow: 0 2px 12px rgba(201,164,104,0.25); }
+.sidebar-divider { height: 1px; margin: 18px 0; background: linear-gradient(90deg, transparent, rgba(201,164,104,0.4), transparent); }
 
-/* sidebar section divider */
-.sidebar-divider {
-    height: 1px; margin: 18px 0;
-    background: linear-gradient(90deg, transparent, rgba(201,164,104,0.4), transparent);
+/* premium workspace surfaces */
+[data-testid="stSidebar"] > div:first-child { padding: 1.4rem 1.1rem; }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #B8C0C9; line-height: 1.55; }
+.hero-shell {
+    position: relative; overflow: hidden; min-height: 248px; margin: 0 0 26px 0;
+    display: grid; grid-template-columns: 1.12fr .88fr; align-items: center; gap: 18px;
+    padding: 28px 34px; border-radius: 24px;
+    background: radial-gradient(circle at 86% 50%, rgba(201,164,104,.20), transparent 32%), radial-gradient(circle at 60% 10%, rgba(79,137,196,.15), transparent 34%), linear-gradient(135deg, rgba(39,53,67,.96), rgba(17,23,30,.98));
+    border: 1px solid rgba(228,198,139,.30);
+    box-shadow: 0 22px 70px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.08);
 }
+.hero-shell:after { content:""; position:absolute; inset:0; pointer-events:none; background: linear-gradient(115deg, transparent 40%, rgba(255,255,255,.05) 50%, transparent 60%); transform: translateX(-75%); animation: sheen 9s ease-in-out infinite; }
+@keyframes sheen { 0%,55% { transform: translateX(-75%); } 75%,100% { transform: translateX(75%); } }
+.hero-copy { position: relative; z-index: 2; }
+.hero-kicker { color: #E4C68B; font: 600 .72rem/1.2 'IBM Plex Mono', monospace; letter-spacing: .17em; text-transform: uppercase; margin-bottom: 12px; }
+.hero-title { margin: 0; color: #F6F1E6; font: 600 clamp(2.2rem, 5vw, 4.2rem)/.95 'Fraunces', serif; letter-spacing: -.045em; }
+.hero-subtitle { max-width: 520px; color: #AFBAC5; font-size: 1rem; line-height: 1.55; margin: 16px 0 0; }
+.hero-pills { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+.hero-pill { padding:7px 11px; border-radius:999px; border:1px solid rgba(201,164,104,.25); background:rgba(255,255,255,.04); color:#D4DCE4; font:500 .7rem 'IBM Plex Mono', monospace; }
+.hero-visual { position:relative; z-index:1; min-height:208px; display:flex; align-items:center; justify-content:center; }
+.hero-orbit, .hero-orbit:before, .hero-orbit:after { position:absolute; content:""; border:1px solid rgba(201,164,104,.30); border-radius:50%; transform:rotateX(64deg) rotateZ(18deg); }
+.hero-orbit { width:210px; height:92px; box-shadow:0 0 32px rgba(201,164,104,.12); animation: orbitFloat 6s ease-in-out infinite; }
+.hero-orbit:before { inset:18px -18px; transform:rotateX(68deg) rotateZ(-32deg); border-color:rgba(92,159,213,.24); }
+.hero-orbit:after { inset:-18px 24px; transform:rotateX(68deg) rotateZ(72deg); border-color:rgba(63,143,95,.22); }
+@keyframes orbitFloat { 0%,100% { transform: translateY(5px) rotateX(64deg) rotateZ(18deg); } 50% { transform: translateY(-8px) rotateX(64deg) rotateZ(18deg); } }
+.hero-cube { filter: drop-shadow(0 0 22px rgba(201,164,104,.28)); }
+.workflow-strip { display:flex; gap:10px; flex-wrap:wrap; margin:0 0 20px; padding:12px 14px; border:1px solid rgba(201,164,104,.16); border-radius:14px; background:rgba(26,34,44,.45); }
+.workflow-step { display:flex; gap:8px; align-items:center; color:#B5C0CB; font:500 .73rem 'IBM Plex Mono', monospace; }
+.workflow-step b { display:grid; place-items:center; width:24px; height:24px; border-radius:8px; color:#19140C; background:linear-gradient(145deg,#E4C68B,#B9925D); font-size:.68rem; }
+.workflow-arrow { color:#6E7D8A; }
+[data-testid="stFileUploader"] { padding: 8px; border: 1px dashed rgba(201,164,104,.35); border-radius: 16px; background: linear-gradient(145deg, rgba(255,255,255,.04), rgba(255,255,255,.015)); }
+[data-testid="stDataFrame"] { box-shadow: 0 14px 36px rgba(0,0,0,.20); }
+@media (max-width: 800px) { .hero-shell { grid-template-columns: 1fr; padding: 24px; } .hero-visual { min-height: 160px; } .hero-title { font-size: 2.7rem; } }
 </style>
 """, unsafe_allow_html=True)
 
@@ -388,22 +384,26 @@ def section(num, label):
 
 
 def render_hero():
-    """The futuristic hero: a rotating CSS 3D cube behind the title, with a scanning
-    glow line sweeping through — pure CSS, no external JS/WebGL dependency."""
+    """Premium hero surface with CSS-only 3D orbital geometry for fast Streamlit loading."""
     st.markdown("""
-        <div class="glass-panel" style="position:relative; overflow:hidden; padding:0;">
-            <div class="hero-scan"></div>
-            <div class="hero-3d-wrap">
-                <div class="hero-cube">
-                    <div class="face front"></div>
-                    <div class="face back"></div>
-                    <div class="face right"></div>
-                    <div class="face left"></div>
-                    <div class="face top"></div>
-                    <div class="face bottom"></div>
+        <section class="hero-shell">
+            <div class="hero-copy">
+                <div class="hero-kicker">GST intelligence / workspace 01</div>
+                <h1 class="hero-title">Read the invoice.<br><em>Know the ledger.</em></h1>
+                <p class="hero-subtitle">Turn handwritten and printed GST invoices into a verified, searchable financial picture — exact to the rupee.</p>
+                <div class="hero-pills"><span class="hero-pill">AI vision extraction</span><span class="hero-pill">Exact math checks</span><span class="hero-pill">Export-ready</span></div>
+            </div>
+            <div class="hero-visual">
+                <div class="hero-orbit"></div>
+                <div class="hero-3d-wrap">
+                    <div class="hero-cube">
+                        <div class="face front"></div><div class="face back"></div><div class="face right"></div>
+                        <div class="face left"></div><div class="face top"></div><div class="face bottom"></div>
+                    </div>
                 </div>
             </div>
-        </div>
+            <div class="hero-scan"></div>
+        </section>
     """, unsafe_allow_html=True)
 
 # ---------- CONFIG ----------
@@ -870,6 +870,7 @@ else:
 
 if not st.session_state.is_admin:
     section("01", "Capture")
+    st.markdown('''<div class="workflow-strip"><span class="workflow-step"><b>01</b> Upload or type</span><span class="workflow-arrow">→</span><span class="workflow-step"><b>02</b> Verify the numbers</span><span class="workflow-arrow">→</span><span class="workflow-step"><b>03</b> Export your ledger</span></div>''', unsafe_allow_html=True)
     tab_upload, tab_manual = st.tabs(["📷 Upload Photo(s)", "⌨️ Enter Manually"])
 
     with tab_upload:
