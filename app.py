@@ -1039,7 +1039,7 @@ if not st.session_state.is_admin:
             edited_items = st.data_editor(
                 st.session_state.manual_line_items,
                 num_rows="dynamic",
-                use_container_width=True,
+                width="stretch",
                 column_config={
                     "particulars": st.column_config.TextColumn("Particulars"),
                     "hsn_code": st.column_config.TextColumn("HSN Code"),
@@ -1181,10 +1181,10 @@ if st.session_state.invoices:
             return "color: #C1553A; font-weight: 600; font-family: 'IBM Plex Mono', monospace;"
         return ""
 
-    styled_df = df.style.applymap(_stamp_style, subset=["Numbers OK?", "GSTIN Check"]).format(
+    styled_df = df.style.map(_stamp_style, subset=["Numbers OK?", "GSTIN Check"]).format(
         {"Subtotal": "₹{:.2f}", "CGST": "₹{:.2f}", "SGST": "₹{:.2f}", "IGST": "₹{:.2f}", "Grand Total": "₹{:.2f}"}
     )
-    st.dataframe(styled_df, use_container_width=True)
+    st.dataframe(styled_df, width="stretch")
 
     n_invalid_gstin = sum(1 for r in rows if r["GSTIN Check"] == "Invalid")
     if n_invalid_gstin:
@@ -1270,7 +1270,7 @@ if st.session_state.invoices:
         vendor_summary = df.groupby("Vendor")["Grand Total"].sum().sort_values(ascending=False)
         st.bar_chart(vendor_summary)
         st.dataframe(vendor_summary.reset_index().rename(columns={"Grand Total": "Total Spend (₹)"}),
-                     use_container_width=True)
+                     width="stretch")
 
     with tab2:
         hsn_rows = []
@@ -1285,7 +1285,7 @@ if st.session_state.invoices:
             hsn_summary = hsn_df.groupby("HSN Code")["Amount"].sum().sort_values(ascending=False)
             st.bar_chart(hsn_summary)
             st.dataframe(hsn_summary.reset_index().rename(columns={"Amount": "Total Amount (₹)"}),
-                         use_container_width=True)
+                         width="stretch")
         else:
             st.caption("No line items to break down yet.")
 
@@ -1311,7 +1311,7 @@ if st.session_state.invoices:
                     Avg_Rate=("Rate", "mean"),
                     Total_Amount=("Amount", "sum"),
                 ).reset_index().sort_values("Total_Amount", ascending=False),
-                use_container_width=True,
+                width="stretch",
             )
         else:
             st.caption("No line items to break down yet.")
@@ -1333,7 +1333,7 @@ if st.session_state.invoices:
             "Amount (₹)": [float(total_cgst), float(total_sgst), float(total_igst)],
         })
         st.bar_chart(tax_df.set_index("Tax type"))
-        st.dataframe(tax_df, use_container_width=True)
+        st.dataframe(tax_df, width="stretch")
 
     with tab6:
         anomalies = detect_anomalies(st.session_state.invoices)
@@ -1348,9 +1348,9 @@ if st.session_state.invoices:
                 "rate": "Billed Rate (₹)", "avg_rate": "Vendor's Usual Rate (₹)", "pct_over": "% Above Usual",
             })
             st.dataframe(
-                anom_df.style.applymap(lambda v: "color: #C1553A; font-weight: 600;", subset=["% Above Usual"])
+                anom_df.style.map(lambda v: "color: #C1553A; font-weight: 600;", subset=["% Above Usual"])
                        .format({"Billed Rate (₹)": "₹{:.2f}", "Vendor's Usual Rate (₹)": "₹{:.2f}", "% Above Usual": "+{:.1f}%"}),
-                use_container_width=True
+                width="stretch"
             )
         else:
             st.markdown(stamp("No overcharge patterns detected", "verified"), unsafe_allow_html=True)
