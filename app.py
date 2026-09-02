@@ -437,7 +437,7 @@ def get_model():
     """Return a model configured with the currently active key and stable free-tier model."""
     idx = get_active_key_index() % len(API_KEYS)
     genai.configure(api_key=API_KEYS[idx])
-    model_name = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = st.secrets.get("GEMINI_MODEL", "gemini-3.6-flash")
     return genai.GenerativeModel(model_name)
 
 
