@@ -78,6 +78,7 @@ h1::after {
     background: linear-gradient(90deg, var(--brass), transparent);
 }
 body, p, div, span, label, .stMarkdown { font-family: 'IBM Plex Sans', sans-serif; }
+[data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label { color: var(--text) !important; opacity: 1 !important; }
 .stCaption, [data-testid="stCaptionContainer"] { color: var(--muted) !important; font-family: 'IBM Plex Sans', sans-serif; }
 
 /* every number in this app renders in tabular mono — decimals align like a ledger */
