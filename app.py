@@ -1581,3 +1581,6 @@ if st.session_state.invoices:
                    "accidentally wiping a paying customer's records. Use direct DB access if truly needed.")
 else:
     st.info("No invoices processed yet. Upload photos above to get started.")
+
+from theme import apply_theme
+apply_theme()
