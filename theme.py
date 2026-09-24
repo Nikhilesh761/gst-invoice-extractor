@@ -109,6 +109,26 @@ input:focus, textarea:focus { border-color: var(--accent) !important; box-shadow
   color: var(--text) !important;
 }
 
+/* forms and bordered containers (the light panel in the manual entry screen) */
+[data-testid="stForm"],
+[data-testid="stVerticalBlockBorderWrapper"] {
+  background: rgba(21, 34, 51, 0.78) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25) !important;
+}
+[data-testid="stForm"] [data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stVerticalBlockBorderWrapper"] {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+[data-testid="stForm"] label, [data-testid="stForm"] p,
+[data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p {
+  color: var(--text) !important;
+}
+[data-testid="stForm"] [data-testid="stMarkdownContainer"] strong { color: var(--accent) !important; }
+
 hr { border-color: var(--border) !important; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
