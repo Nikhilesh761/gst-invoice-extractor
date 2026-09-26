@@ -1159,6 +1159,7 @@ if st.session_state.invoices:
         rows.append({
             "File": inv.get("_source_file", ""),
             "Customer tag": inv.get("_customer_tag", ""),
+            "Customer (on bill)": inv.get("customer_name", "") or "—",
             "Vendor": inv.get("vendor_name", ""),
             "Vendor GSTIN": inv.get("vendor_gstin", "") or "—",
             "GSTIN Check": gstin_label,
@@ -1225,7 +1226,9 @@ if st.session_state.invoices:
     # ---------- LINE ITEM DETAIL ----------
     with st.expander("View line-item detail per invoice"):
         for inv in st.session_state.invoices:
-            st.markdown(f"**{inv.get('vendor_name','')} — Bill {inv.get('bill_no','')} ({inv.get('date','')})**")
+            bill_customer = inv.get("customer_name", "").strip()
+            customer_suffix = f" — Billed to: {bill_customer}" if bill_customer else ""
+            st.markdown(f"**{inv.get('vendor_name','')} — Bill {inv.get('bill_no','')} ({inv.get('date','')}){customer_suffix}**")
             items = inv.get("line_items", [])
             if items:
                 st.table(pd.DataFrame(items))
